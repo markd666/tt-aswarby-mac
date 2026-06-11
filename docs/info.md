@@ -22,14 +22,20 @@ well-defined, exactly as in real fixed-point inference hardware. A sticky
 Internally the design is two small modules:
 
 - `mac_core` — the datapath: weight register, signed 8×8 multiplier, saturating
-  32-bit accumulator, and a combinational byte-select mux for readout.
+  32-bit accumulator, and a combinational byte-select mux for readout. The MAC
+  is **3-stage pipelined** — multiply, then 33-bit add, then saturate/clamp,
+  each in its own cycle — so the result commits to the accumulator three cycles
+  after the command is accepted.
 - `mac_fsm` — a 2-state controller that converts each rising edge of `strobe`
-  into a single-cycle execute pulse, so one strobe = exactly one operation
-  (no repeated accumulation while strobe is held high), and raises `done`.
+  into a single-cycle execute pulse (one strobe = exactly one operation, no
+  repeated accumulation while strobe is held high) and raises `done` once the
+  pipelined result has committed.
 
 Everything is fully synchronous to `clk`, single clock domain, active-low reset.
-The critical path is one 8×8 multiply plus a 33-bit add — trivially inside the
-50 MHz tile budget.
+The pipeline keeps each stage's logic to a single operation so the design closes
+timing at the 50 MHz tile target on the 180 nm GF180 process (a single-cycle
+multiply-and-accumulate does not — see the project notes). Per-operation latency
+is hidden behind `done`, so the host protocol is unchanged.
 
 ### Pin map
 

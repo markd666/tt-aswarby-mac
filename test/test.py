@@ -90,8 +90,9 @@ async def op(dut, cmd, data=0):
     await ClockCycles(dut.clk, 1)
     dut.uio_in.value = uio_inputs(cmd=cmd, strobe=1)
     # Wait for the done pulse (uio_out[5]); bounded so a hang fails loudly.
+    # The MAC pipeline is 3 deep, so done arrives several cycles after strobe.
     seen_done = False
-    for _ in range(8):
+    for _ in range(16):
         await ClockCycles(dut.clk, 1)
         if (int(dut.uio_out.value) >> 5) & 1:
             seen_done = True
@@ -201,12 +202,14 @@ async def test_positive_saturation(dut):
 
     base_mac = uio_inputs(cmd=CMD_MAC)
     dut.ui_in.value = s8_bits(-128)
+    # 7-cycle period (2 high / 5 low) keeps ops spaced wider than the 3-deep
+    # pipeline so each MAC fully commits before the next one's stage-2 read.
     N = 131072
     for _ in range(N):
         dut.uio_in.value = base_mac | (1 << 2)   # strobe high
         await ClockCycles(dut.clk, 2)
         dut.uio_in.value = base_mac              # strobe low (re-arm)
-        await ClockCycles(dut.clk, 1)
+        await ClockCycles(dut.clk, 5)
         gold.mac(-128)
 
     assert gold.acc == INT32_MAX               # golden sanity: it saturated
@@ -227,12 +230,13 @@ async def test_negative_saturation(dut):
     base_mac = uio_inputs(cmd=CMD_MAC)
     dut.ui_in.value = s8_bits(-128)
     # Enough iterations to cross -2^31: ceil(2^31 / 16256) = 132137.
+    # 7-cycle period (2 high / 5 low) keeps ops spaced wider than the pipeline.
     N = 132137
     for _ in range(N):
         dut.uio_in.value = base_mac | (1 << 2)
         await ClockCycles(dut.clk, 2)
         dut.uio_in.value = base_mac
-        await ClockCycles(dut.clk, 1)
+        await ClockCycles(dut.clk, 5)
         gold.mac(-128)
 
     assert gold.acc == INT32_MIN
