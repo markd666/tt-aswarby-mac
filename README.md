@@ -38,11 +38,18 @@ The same suite re-runs against the synthesized gate-level netlist in CI
 
 ## Status
 
-RTL complete; all cocotb tests pass locally on Icarus Verilog. Targeting the
-**GF26B** shuttle (GlobalFoundries 180nm, `gf180mcuD`); GDS hardening via the
-Tiny Tapeout `tt-gds-action@ttgf26b` runs in GitHub Actions. Final shuttle
-submission is gated on reviewing the area/timing reports — see the project plan
-for the build-first, commit-later sequencing.
+**Submission-ready for the GF26B shuttle** (GlobalFoundries 180nm, `gf180mcuD`).
+
+- RTL complete; cocotb suite 7/7 on Icarus (incl. both INT32 saturation directions).
+- GDS hardens cleanly via `tt-gds-action@ttgf26b`; all CI gates green —
+  `gds`, gate-level `gl_test`, all 11 Tiny Tapeout prechecks, and the GDS viewer.
+- Occupies ~54% of one 1×1 tile.
+- Timing: setup closes with +7.4 ns margin at the typical corner; a small
+  residual remains only at the slow `ss` 125°C/3.0V corner (≈−1.6 ns, a
+  sign-off warning, not a blocker). The design runs at the 50 MHz target under
+  normal conditions.
+
+Layout viewer: https://markd666.github.io/tt-aswarby-mac/
 
 ## License
 
