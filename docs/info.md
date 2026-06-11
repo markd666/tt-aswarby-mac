@@ -23,9 +23,11 @@ Internally the design is two small modules:
 
 - `mac_core` — the datapath: weight register, signed 8×8 multiplier, saturating
   32-bit accumulator, and a combinational byte-select mux for readout. The MAC
-  is **3-stage pipelined** — multiply, then 33-bit add, then saturate/clamp,
-  each in its own cycle — so the result commits to the accumulator three cycles
-  after the command is accepted.
+  is **4-stage pipelined** — split-multiply, reconstruct product, 33-bit add,
+  then saturate/clamp, each in its own cycle — so the result commits to the
+  accumulator four cycles after the command is accepted. (The multiply is split
+  into two parallel nibble-products because a full 8×8 multiply alone is too
+  long a path for 50 MHz on the 180 nm node.)
 - `mac_fsm` — a 2-state controller that converts each rising edge of `strobe`
   into a single-cycle execute pulse (one strobe = exactly one operation, no
   repeated accumulation while strobe is held high) and raises `done` once the

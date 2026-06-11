@@ -6,7 +6,7 @@
  * once the pipelined result has committed to the accumulator.
  *
  * `done` is `do_op` delayed by DONE_DELAY cycles. The mac_core MAC pipeline is
- * 3 deep, so DONE_DELAY is sized to fire `done` the cycle after the accumulator
+ * 4 deep, so DONE_DELAY is sized to fire `done` the cycle after the accumulator
  * settles; the host waits for `done` before reading or issuing the next op,
  * which also guarantees ops are spaced wider than the pipeline depth.
  *
@@ -21,7 +21,7 @@
 `default_nettype none
 
 module mac_fsm #(
-    parameter DONE_DELAY = 4
+    parameter DONE_DELAY = 5
 ) (
     input  wire clk,
     input  wire rst_n,

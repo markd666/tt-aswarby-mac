@@ -1,18 +1,23 @@
 /*
  * mac_core - signed INT8 x INT8 -> INT32 weight-stationary multiply-accumulate
  *
- * Pipelined datapath (to close timing at 50 MHz on the slow GF180 node, where a
- * single-cycle multiply + 33-bit accumulate is too long a combinational path):
+ * Pipelined datapath (4 stages) so each stage's logic stays short enough to
+ * close timing at 50 MHz on the slow 180 nm GF180 node, where even a single
+ * 8x8 multiply is too long a combinational path for 20 ns:
  *
- *   stage 1  prod_q <= data * weight        (multiply only)
- *   stage 2  sum_q  <= acc + prod_q          (33-bit add only)
- *   stage 3  acc    <= saturate(sum_q)       (compare + clamp only)
+ *   stage 1  split-multiply : pp_hi <= a_hi * weight ; pp_lo <= a_lo * weight
+ *   stage 2  reconstruct    : prod_q <= (pp_hi << 4) + pp_lo          (full product)
+ *   stage 3  accumulate     : sum_q  <= acc + prod_q                  (33-bit add)
+ *   stage 4  saturate       : acc    <= fits ? sum_q : clamp          (sign-bit test)
  *
- * A MAC therefore commits to `acc` three cycles after its `do_op`. Operations
- * are issued one at a time via the strobe handshake (see mac_fsm), spaced far
- * enough apart that the pipeline always drains before the next op's stage-2
- * read of `acc`, so no forwarding/hazard logic is needed. load-weight and clear
- * act in stage 1 and are likewise spaced.
+ * The activation byte a is split as a = a_hi*16 + a_lo with a_hi a signed
+ * nibble (-8..7) and a_lo an unsigned nibble (0..15), so a*weight =
+ * (a_hi*weight)<<4 + a_lo*weight. Each half is a 4x8 multiply (about half the
+ * depth of an 8x8), parallel in stage 1 and summed in stage 2.
+ *
+ * A MAC commits to `acc` four cycles after its `do_op`. Operations are issued
+ * one at a time via the strobe handshake (mac_fsm), spaced wider than the
+ * pipeline depth, so no forwarding/hazard logic is needed.
  *
  * Copyright (c) 2026 Mark Shilton
  * SPDX-License-Identifier: Apache-2.0
@@ -36,19 +41,19 @@ module mac_core (
                    CMD_MAC   = 2'b10,
                    CMD_CLEAR = 2'b11;
 
-  localparam signed [32:0] SAT_MAX = 33'sd2147483647;   // +2^31 - 1
-  localparam signed [32:0] SAT_MIN = -33'sd2147483648;  // -2^31
-
   reg signed [7:0]  weight_q;
   reg signed [31:0] acc;
   reg               ovf_sticky;
 
-  // Pipeline registers + valid bits for the MAC path.
-  reg               mac_v1, mac_v2;
-  reg signed [15:0] prod_q;   // stage 1 result
-  reg signed [32:0] sum_q;    // stage 2 result (pre-saturate, 33-bit headroom)
+  // Pipeline valids and registers.
+  reg               mac_v1, mac_v2, mac_v3;
+  reg signed [12:0] pp_hi, pp_lo;   // stage 1: half products
+  reg signed [16:0] prod_q;         // stage 2: full product (fits in 16b; 17b spare)
+  reg signed [32:0] sum_q;          // stage 3: pre-saturate sum (33-bit headroom)
 
-  wire signed [7:0] data_s = data;   // reinterpret input byte as INT8
+  // Activation nibble split (combinational off the input byte).
+  wire signed [3:0] a_hi = data[7:4];                 // signed nibble (-8..7)
+  wire signed [5:0] a_lo = $signed({2'b00, data[3:0]}); // unsigned nibble as +ve signed
 
   always @(posedge clk) begin
     if (!rst_n) begin
@@ -57,19 +62,24 @@ module mac_core (
       ovf_sticky <= 1'b0;
       mac_v1     <= 1'b0;
       mac_v2     <= 1'b0;
-      prod_q     <= 16'sd0;
+      mac_v3     <= 1'b0;
+      pp_hi      <= 13'sd0;
+      pp_lo      <= 13'sd0;
+      prod_q     <= 17'sd0;
       sum_q      <= 33'sd0;
     end else begin
-      // Valid bits advance every cycle; default no new MAC.
+      // Valids advance every cycle; default no new MAC.
       mac_v1 <= 1'b0;
       mac_v2 <= mac_v1;
+      mac_v3 <= mac_v2;
 
-      // ---- stage 0: accept an operation -------------------------------------
+      // ---- stage 0/1: accept op; split-multiply -----------------------------
       if (do_op) begin
         case (cmd)
-          CMD_LOADW: weight_q <= data_s;
+          CMD_LOADW: weight_q <= data;          // reinterpret byte as INT8
           CMD_MAC: begin
-            prod_q <= data_s * weight_q;   // stage 1: multiply
+            pp_hi  <= a_hi * weight_q;           // signed 4x8
+            pp_lo  <= a_lo * weight_q;           // signed 6x8 (a_lo >= 0)
             mac_v1 <= 1'b1;
           end
           CMD_CLEAR: begin
@@ -80,17 +90,18 @@ module mac_core (
         endcase
       end
 
-      // ---- stage 2: 33-bit add (registered) ---------------------------------
+      // ---- stage 2: reconstruct full product --------------------------------
       if (mac_v1)
-        sum_q <= {acc[31], acc} + {{17{prod_q[15]}}, prod_q};
+        prod_q <= (pp_hi <<< 4) + pp_lo;
 
-      // ---- stage 3: saturate + write back -----------------------------------
-      if (mac_v2) begin
-        if (sum_q > SAT_MAX) begin
-          acc        <= 32'sh7FFF_FFFF;
-          ovf_sticky <= 1'b1;
-        end else if (sum_q < SAT_MIN) begin
-          acc        <= 32'sh8000_0000;
+      // ---- stage 3: 33-bit accumulate ---------------------------------------
+      if (mac_v2)
+        sum_q <= {acc[31], acc} + {{16{prod_q[16]}}, prod_q};
+
+      // ---- stage 4: saturate (overflow iff top two bits differ) -------------
+      if (mac_v3) begin
+        if (sum_q[32] != sum_q[31]) begin
+          acc        <= sum_q[32] ? 32'sh8000_0000 : 32'sh7FFF_FFFF;
           ovf_sticky <= 1'b1;
         end else begin
           acc <= sum_q[31:0];
