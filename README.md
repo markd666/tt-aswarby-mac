@@ -38,10 +38,11 @@ The same suite re-runs against the synthesized gate-level netlist in CI
 
 ## Status
 
-RTL complete; all cocotb tests pass locally on Icarus Verilog. GDS hardening via
-the Tiny Tapeout `tt-gds-action` runs in GitHub Actions (sky130A). Shuttle
-submission is deferred until the area/timing reports are reviewed — see the
-project plan for the build-first, commit-later sequencing.
+RTL complete; all cocotb tests pass locally on Icarus Verilog. Targeting the
+**GF26B** shuttle (GlobalFoundries 180nm, `gf180mcuD`); GDS hardening via the
+Tiny Tapeout `tt-gds-action@ttgf26b` runs in GitHub Actions. Final shuttle
+submission is gated on reviewing the area/timing reports — see the project plan
+for the build-first, commit-later sequencing.
 
 ## License
 

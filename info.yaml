@@ -7,8 +7,8 @@ project:
   language:     "Verilog"
   clock_hz:     50000000
 
-  # A single tile is about 167x108 uM. Start at 1x1; bump to 1x2 only if the
-  # LibreLane area report overflows.
+  # GF180 single tile is about 340x160 uM. Start at 1x1; bump to 1x2 only if the
+  # LibreLane area report overflows. Valid: 1x1, 1x2, 2x2, 3x2, 4x2, 3x4, 4x4.
   tiles: "1x1"
 
   top_module:  "tt_um_aswarby_mac"
